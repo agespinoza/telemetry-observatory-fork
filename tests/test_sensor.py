@@ -22,7 +22,27 @@ def test_collect_skips_inaccessible_volume_and_process(monkeypatch):
     monkeypatch.setattr(host_sensor.psutil, 'swap_memory', lambda: None)
     monkeypatch.setattr(host_sensor.psutil, 'disk_io_counters', lambda: None)
     monkeypatch.setattr(host_sensor.psutil, 'net_io_counters', lambda: None)
+    monkeypatch.setattr(host_sensor.psutil, 'sensors_battery', lambda: None)
     result = host_sensor.collect()
     assert result['disks'][0]['mount'] == '/'
     assert len(result['disks']) == 1
     assert result['applications'][0]['pid'] == 7
+
+
+def test_top_applications_keeps_busy_low_memory_process():
+    apps = [{'pid': i, 'memory_bytes': 1000 - i, 'cpu_percent': 0} for i in range(30)]
+    apps.append({'pid': 99, 'memory_bytes': 1, 'cpu_percent': 80})
+    result = host_sensor.top_applications(apps, limit=20)
+    pids = [app['pid'] for app in result]
+    assert 99 in pids
+    assert len(pids) == len(set(pids)) == 21
+    assert pids[0] == 0
+
+
+def test_battery_reports_state_and_hides_unknown_time(monkeypatch):
+    monkeypatch.setattr(host_sensor.psutil, 'sensors_battery', lambda: SimpleNamespace(percent=66.04, secsleft=17220, power_plugged=False))
+    assert host_sensor.battery() == {'percent': 66.0, 'plugged': False, 'seconds_left': 17220}
+    monkeypatch.setattr(host_sensor.psutil, 'sensors_battery', lambda: SimpleNamespace(percent=100, secsleft=host_sensor.psutil.POWER_TIME_UNLIMITED, power_plugged=True))
+    assert host_sensor.battery()['seconds_left'] is None
+    monkeypatch.setattr(host_sensor.psutil, 'sensors_battery', lambda: None)
+    assert host_sensor.battery() is None

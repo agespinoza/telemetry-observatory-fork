@@ -20,7 +20,9 @@ docker compose ps
 - **Network down** and **Network up** show bytes received and sent per second across all network interfaces, calculated the same way from cumulative network counters.
 - **Resource history** plots CPU and memory percentages. **Live** shows the newest 120 samples and refreshes every 5 seconds. **1 h**, **24 h** and **7 d** show averages over that period, at most 360 points, and refresh every minute. A period can only show samples that are still within the retention policy.
 - **Storage** lists mounted volumes and their used capacity.
-- **Applications by memory** lists up to twelve processes, ordered by resident memory use.
+- **Swap used** shows how much disk macOS is using as extra memory. Steady growth means the Mac is short of physical memory.
+- **Battery** shows charge and power state, or time remaining on battery while macOS can estimate it. Macs without a battery hide this tile.
+- **Applications by memory** lists up to twelve processes. Select the **Memory** or **CPU** column header to order them by that value. Per-process CPU can exceed 100% because it is summed across cores, as in Activity Monitor, and it reads 0% on the first sample after the sensor starts.
 - The dashboard requests updated data every five seconds.
 
 The header status describes the latest sample/API connection:

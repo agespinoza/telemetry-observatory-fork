@@ -78,6 +78,7 @@ class Sample(BaseModel):
     disk_io: dict
     network_io: dict
     applications: list[dict]
+    battery: dict | None = None
 
 
 @asynccontextmanager

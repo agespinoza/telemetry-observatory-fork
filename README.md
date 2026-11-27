@@ -76,4 +76,4 @@ Re-run `./scripts/install-sensor.sh` (and `./scripts/install-control.sh` when `C
 
 ## Data collection notes
 
-The sensor uses `psutil` to collect CPU, physical and swap memory, disk capacity and I/O counters, network counters, and process information. The dashboard displays CPU, physical memory, disk read/write rates, network download/upload rates, mounted-volume usage, resource history, and the twelve processes using the most memory. macOS may deny access to some processes or volumes; those entries are skipped. The dashboard reports this Mac only and does not aggregate remote hosts.
+The sensor uses `psutil` to collect CPU, physical and swap memory, disk capacity and I/O counters, network counters, battery state, and process information. The dashboard displays CPU, physical memory, disk read/write rates, network download/upload rates, swap use, battery state, mounted-volume usage, resource history, and the twelve processes using the most memory or CPU. macOS may deny access to some processes or volumes; those entries are skipped. The dashboard reports this Mac only and does not aggregate remote hosts.
