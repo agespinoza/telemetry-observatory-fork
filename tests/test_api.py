@@ -21,6 +21,9 @@ def test_retention_update_recalculates_existing_expiry(monkeypatch, tmp_path):
     at = datetime(2026, 1, 1)
 
     class Settings:
+        def find_one(self, query):
+            return {'frequency_seconds': 3, 'retention_days': 2}
+
         def update_one(self, query, change, upsert=False):
             assert change['$set']['retention_days'] == 2
             assert upsert

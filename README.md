@@ -30,20 +30,27 @@ python3 -m venv .venv
 cp .env.example .env
 ```
 
-Edit `.env` and replace both example values with different random secrets of at least 24 characters. For example, generate each value with:
+Edit `.env` and replace the `ADMIN_TOKEN` and `SENSOR_TOKEN` example values with different random secrets of at least 24 characters. For example, generate each value with:
 
 ```sh
 python3 -c 'import secrets; print(secrets.token_urlsafe(36))'
 ```
 
-Keep `.env` private. Install and start the native macOS sensor, then build and start the containers:
+Keep `.env` private. Install and start the native macOS sensor and the host control agent, then build and start the containers:
 
 ```sh
 ./scripts/install-sensor.sh
+./scripts/install-control.sh
 docker compose up -d --build
 ```
 
 The script registers the host sensor with `launchd`; it runs in the background and can read macOS host counters that containers cannot access. Docker Compose exposes the dashboard only on `127.0.0.1`. The sensor listens on port `8765` by default so Docker Desktop can reach it and requires `SENSOR_TOKEN`.
+
+The control agent (`host_control.py`, also a `launchd` service) lets the dashboard's **Configuration** form restart the Compose services. It listens on `127.0.0.1:8766` (`CONTROL_PORT`) and only accepts requests carrying `ADMIN_TOKEN`. It is optional: without it everything works except the **Restart services** button.
+
+## Configuration
+
+Open **Configuration** in the dashboard header to change the polling frequency, retention period, and external dashboard port, and to restart the services. Saving requires the administrator token (`ADMIN_TOKEN`). A changed port takes effect only after **Restart services**, which updates `DASHBOARD_PORT` in `.env` and recreates the containers. See the [user manual](docs/user-manual.md#configuration) for details.
 
 For detailed usage and troubleshooting, see the [user manual](docs/user-manual.md). The component map, data flow, interfaces, and operational constraints are in the [design document](docs/design.md).
 
@@ -58,13 +65,14 @@ docker compose down       # stops containers; preserves MongoDB data
 docker compose down -v    # also deletes the MongoDB data volume
 ```
 
-To stop the host sensor:
+To stop the host sensor or the control agent:
 
 ```sh
 launchctl bootout "gui/$(id -u)/com.telemetry-observatory.sensor"
+launchctl bootout "gui/$(id -u)/com.telemetry-observatory.control"
 ```
 
-Re-run `./scripts/install-sensor.sh` after changing `.env` or moving the project directory. MongoDB removes expired samples asynchronously according to the configured retention policy. Back up the Compose MongoDB volume before deleting it.
+Re-run `./scripts/install-sensor.sh` (and `./scripts/install-control.sh` when `CONTROL_PORT` changes) after changing `.env` or moving the project directory. MongoDB removes expired samples asynchronously according to the configured retention policy. Back up the Compose MongoDB volume before deleting it.
 
 ## Data collection notes
 

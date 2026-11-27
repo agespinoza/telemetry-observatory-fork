@@ -1,14 +1,27 @@
 from datetime import datetime, timedelta, timezone
 from dataclasses import dataclass
+from typing import Optional
 
 
 DEFAULT_FREQUENCY_SECONDS = 10
 DEFAULT_RETENTION_DAYS = 7
+DEFAULT_DASHBOARD_PORT = 8080
 
 @dataclass(frozen=True)
 class Policy:
     frequency_seconds: int
     retention_days: int
+    dashboard_port: Optional[int] = None
+
+
+def validate_port(value) -> int:
+    """Return value if it is an integer TCP port in 1024-65535, otherwise raise ValueError."""
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValueError("'dashboard_port' must be an integer.")
+    if value < 1024 or value > 65535:
+        raise ValueError("'dashboard_port' must be between 1024 and 65535 (inclusive).")
+    return value
+
 
 def validate_policy(payload: dict) -> Policy:
     """
@@ -49,7 +62,8 @@ def validate_policy(payload: dict) -> Policy:
     if ret_val < 1 or ret_val > 365:
         raise ValueError("'retention_days' must be between 1 and 365 (inclusive).")
 
-    return Policy(frequency_seconds=freq_val, retention_days=ret_val)
+    port = validate_port(payload["dashboard_port"]) if payload.get("dashboard_port") is not None else None
+    return Policy(frequency_seconds=freq_val, retention_days=ret_val, dashboard_port=port)
 
 def expiry_for(sampled_at: datetime, retention_days: int) -> datetime:
     """

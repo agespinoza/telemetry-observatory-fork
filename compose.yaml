@@ -18,7 +18,10 @@ services:
       MONGO_URI: mongodb://mongo:27017
       ADMIN_TOKEN: ${ADMIN_TOKEN:?Set ADMIN_TOKEN in .env}
       AUDIT_PATH: /audits/api.jsonl
+      DASHBOARD_PORT: ${DASHBOARD_PORT:-8080}
+      CONTROL_URL: http://host.docker.internal:${CONTROL_PORT:-8766}
     volumes: ["./audits:/audits"]
+    extra_hosts: ["host.docker.internal:host-gateway"]
     depends_on: {mongo: {condition: service_healthy}}
     networks: [private]
   poller:

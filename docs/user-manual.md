@@ -4,7 +4,7 @@ Telemetry Observatory presents resource and process information from one macOS h
 
 ## Start and open the dashboard
 
-Complete the setup in the [README](../README.md), including creating `.env`, installing the host sensor, and starting Docker Compose. Open <http://127.0.0.1:8080>.
+Complete the setup in the [README](../README.md), including creating `.env`, installing the host sensor and control agent, and starting Docker Compose. Open <http://127.0.0.1:8080>.
 
 Check whether the services are running with:
 
@@ -30,16 +30,18 @@ The header status describes the latest sample/API connection:
 
 Some process or volume information may be absent because macOS denied access. A process CPU reading can be zero on its first observation.
 
-## Change polling and retention
+## Configuration
 
-Use the **Data policy** form to update:
+Choose **Configuration** in the dashboard header to open the configuration form:
 
 - **Poll every**: 2 to 3600 seconds. The default is 10 seconds.
 - **Retain for**: 1 to 365 days. The default is 7 days.
+- **External port**: host port for the dashboard (1024 to 65535). Changing it shows a warning because a restart of services is required.
+- **Administrator token**: the `ADMIN_TOKEN` value from `.env`; required to save or restart. The browser does not persist it.
 
-Enter the `ADMIN_TOKEN` value from `.env` in the administrator token field and choose **Save policy**. The API rejects invalid or missing tokens. The browser does not persist the token and clears it after a successful save.
+**Save configuration** stores the values. The poller reads the updated frequency at the start of its next cycle, and retention changes recalculate expiry times for existing samples (MongoDB's TTL monitor deletes asynchronously).
 
-The poller reads the updated frequency at the start of its next cycle, after its current wait. When retention changes, the API recalculates expiry times for existing samples. MongoDB's TTL monitor removes expired records asynchronously, so deletion may not happen immediately.
+**Restart services** saves the form, writes `DASHBOARD_PORT` to `.env`, and runs `docker compose up -d --force-recreate` through the host control agent. Install the agent once (and after moving the project) with `./scripts/install-control.sh`; it listens on `127.0.0.1:${CONTROL_PORT:-8766}` and accepts only requests carrying the administrator token. If it is not running, the restart fails with "Restart agent is unavailable". After a port change the page redirects to the new port.
 
 ## Stop, restart, and remove data
 
@@ -67,14 +69,17 @@ Stop the macOS host sensor separately:
 launchctl bootout "gui/$(id -u)/com.telemetry-observatory.sensor"
 ```
 
-Run `./scripts/install-sensor.sh` again to install/start the sensor, including after changing `.env` or moving the project directory. Back up the `mongo_data` Compose volume before removing it if the samples need to be retained.
+Stop the host control agent with `launchctl bootout "gui/$(id -u)/com.telemetry-observatory.control"`.
+
+Run `./scripts/install-sensor.sh` again to install/start the sensor, including after changing `.env` or moving the project directory; do the same with `./scripts/install-control.sh` for the control agent. Back up the `mongo_data` Compose volume before removing it if the samples need to be retained.
 
 ## Troubleshooting
 
-1. **Dashboard does not open:** Check `docker compose ps` and confirm Docker Desktop is running. The dashboard port can be changed with `DASHBOARD_PORT` in `.env`; the default is 8080.
+1. **Dashboard does not open:** Check `docker compose ps` and confirm Docker Desktop is running. The dashboard port can be changed in **Configuration** (then **Restart services**) or with `DASHBOARD_PORT` in `.env`; the default is 8080. After a port change, open the new port.
 2. **Disconnected status:** Inspect API and dashboard logs with `docker compose logs --tail=100 api dashboard`. The dashboard is served through Nginx, which proxies `/api/` requests to the API.
 3. **Stale sample:** Check that the host sensor is installed and running, and inspect `audits/sensor.jsonl` and `audits/poller.jsonl`. Verify that `SENSOR_TOKEN` in `.env` is valid and that the sensor port is reachable from Docker Desktop.
 4. **Services fail to start:** Check API and MongoDB startup output with `docker compose logs --tail=100 api mongo`. Verify `ADMIN_TOKEN` and `SENSOR_TOKEN` are each set to at least 24 characters in `.env`.
-5. **Policy save fails:** Confirm the administrator token matches `ADMIN_TOKEN` in `.env`; check `audits/api.jsonl` for denied authorization or validation requests.
+5. **Configuration save fails:** Confirm the administrator token matches `ADMIN_TOKEN` in `.env`; check `audits/api.jsonl` for denied authorization or validation requests.
+6. **Restart services fails:** "Restart agent is unavailable" means the control agent is not reachable; run `./scripts/install-control.sh` and check `audits/control-console.log`. A "restart already in progress" error means a previous restart is still running; wait and retry. The agent needs `docker` on its `PATH`, which the installer captures from your current shell.
 
 Audit files are written under `audits/`: `sensor.jsonl`, `poller.jsonl`, `api.jsonl`, `dashboard-access.log`, `dashboard-error.log`, and `mongo.log`. These logs can contain operational and request metadata; protect and rotate them appropriately.

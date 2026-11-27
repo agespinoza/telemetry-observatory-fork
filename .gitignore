@@ -5,3 +5,4 @@ __pycache__/
 .sensor.launchd.plist
 audits/*
 !audits/.gitkeep
+.control.launchd.plist

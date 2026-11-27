@@ -3,6 +3,8 @@ import json
 import os
 import secrets
 import threading
+import urllib.error
+import urllib.request
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
@@ -11,7 +13,7 @@ from fastapi import FastAPI, Header, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 from pymongo import ASCENDING, DESCENDING, MongoClient
 
-from policy import DEFAULT_FREQUENCY_SECONDS, DEFAULT_RETENTION_DAYS, expiry_for, validate_policy
+from policy import DEFAULT_DASHBOARD_PORT, DEFAULT_FREQUENCY_SECONDS, DEFAULT_RETENTION_DAYS, expiry_for, validate_policy
 
 client = MongoClient(os.getenv("MONGO_URI", "mongodb://localhost:27017"), serverSelectionTimeoutMS=3000)
 samples = client.observatory.samples
@@ -35,9 +37,35 @@ def require_admin(header):
         raise HTTPException(401, "Invalid administrator token")
 
 
+def active_port():
+    return int(os.getenv("DASHBOARD_PORT", DEFAULT_DASHBOARD_PORT))
+
+
 def current_policy():
     doc = settings.find_one({"_id": "global"}) or {}
     return {"frequency_seconds": doc.get("frequency_seconds", DEFAULT_FREQUENCY_SECONDS), "retention_days": doc.get("retention_days", DEFAULT_RETENTION_DAYS)}
+
+
+def configuration():
+    doc = settings.find_one({"_id": "global"}) or {}
+    port = doc.get("dashboard_port", active_port())
+    return {"frequency_seconds": doc.get("frequency_seconds", DEFAULT_FREQUENCY_SECONDS), "retention_days": doc.get("retention_days", DEFAULT_RETENTION_DAYS), "dashboard_port": port, "active_dashboard_port": active_port(), "restart_required": port != active_port()}
+
+
+def request_restart(port):
+    req = urllib.request.Request(
+        os.getenv("CONTROL_URL", "http://host.docker.internal:8766").rstrip("/") + "/restart",
+        data=json.dumps({"dashboard_port": port}).encode(),
+        headers={"Content-Type": "application/json", "Authorization": "Bearer " + os.getenv("ADMIN_TOKEN", "")},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=10) as response:
+            return response.status == 202
+    except urllib.error.HTTPError as exc:
+        raise HTTPException(502 if exc.code >= 500 else exc.code, "Restart agent rejected the request") from exc
+    except (urllib.error.URLError, OSError) as exc:
+        raise HTTPException(503, "Restart agent is unavailable; is host_control.py running?") from exc
 
 
 class Sample(BaseModel):
@@ -72,7 +100,7 @@ def health():
 
 @app.get("/api/settings")
 def get_settings():
-    return current_policy()
+    return configuration()
 
 
 @app.put("/api/settings")
@@ -83,13 +111,28 @@ def put_settings(value: dict, authorization: str | None = Header(default=None)):
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
     data = {"frequency_seconds": policy.frequency_seconds, "retention_days": policy.retention_days}
+    if policy.dashboard_port is not None:
+        data["dashboard_port"] = policy.dashboard_port
     settings.update_one({"_id": "global"}, {"$set": data}, upsert=True)
     # Recalculate existing expiry dates when the retention policy changes.
     for item in samples.find({}, {"_id": 1, "sampled_at": 1}):
         at = item["sampled_at"].replace(tzinfo=timezone.utc)
         samples.update_one({"_id": item["_id"]}, {"$set": {"expires_at": expiry_for(at, policy.retention_days)}})
     audit("settings.update", "ok", data)
-    return data
+    return configuration()
+
+
+@app.post("/api/restart", status_code=202)
+def restart(authorization: str | None = Header(default=None)):
+    require_admin(authorization)
+    port = configuration()["dashboard_port"]
+    try:
+        request_restart(port)
+    except HTTPException as exc:
+        audit("services.restart", "error", {"detail": exc.detail})
+        raise
+    audit("services.restart", "requested", {"dashboard_port": port})
+    return {"status": "restarting", "dashboard_port": port}
 
 
 @app.post("/api/samples", status_code=201)
