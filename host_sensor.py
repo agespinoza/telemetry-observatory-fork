@@ -24,6 +24,26 @@ def counter(value):
     return value._asdict() if value is not None else {}
 
 
+def battery():
+    """Battery state, or None on Macs without a battery."""
+    read = getattr(psutil, "sensors_battery", None)
+    value = read() if read else None
+    if value is None:
+        return None
+    seconds = value.secsleft
+    known = isinstance(seconds, (int, float)) and seconds >= 0
+    return {"percent": round(value.percent, 1), "plugged": value.power_plugged, "seconds_left": int(seconds) if known else None}
+
+
+def top_applications(applications, limit=20):
+    """Union of the top processes by memory and by CPU, so the dashboard can sort by either."""
+    chosen = {}
+    for key in ("memory_bytes", "cpu_percent"):
+        for item in sorted(applications, key=lambda app: app[key], reverse=True)[:limit]:
+            chosen.setdefault(item["pid"], item)
+    return sorted(chosen.values(), key=lambda app: app["memory_bytes"], reverse=True)
+
+
 def collect():
     disks = []
     seen = set()
@@ -43,8 +63,7 @@ def collect():
             applications.append({"pid": info["pid"], "name": info["name"] or "unknown", "memory_bytes": info["memory_info"].rss if info["memory_info"] else 0, "cpu_percent": info["cpu_percent"] or 0})
         except (psutil.NoSuchProcess, psutil.AccessDenied, OSError):
             pass
-    applications.sort(key=lambda item: item["memory_bytes"], reverse=True)
-    return {"host": socket.gethostname(), "sampled_at": datetime.now(timezone.utc).isoformat(), "cpu_percent": psutil.cpu_percent(interval=0.1), "memory": counter(psutil.virtual_memory()), "swap": counter(psutil.swap_memory()), "disks": disks, "disk_io": counter(psutil.disk_io_counters()), "network_io": counter(psutil.net_io_counters()), "applications": applications[:30]}
+    return {"host": socket.gethostname(), "sampled_at": datetime.now(timezone.utc).isoformat(), "cpu_percent": psutil.cpu_percent(interval=0.1), "memory": counter(psutil.virtual_memory()), "swap": counter(psutil.swap_memory()), "disks": disks, "disk_io": counter(psutil.disk_io_counters()), "network_io": counter(psutil.net_io_counters()), "applications": top_applications(applications), "battery": battery()}
 
 
 class Handler(BaseHTTPRequestHandler):

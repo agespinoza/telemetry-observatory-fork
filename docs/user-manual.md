@@ -17,9 +17,13 @@ docker compose ps
 - **CPU utilization** shows current CPU use.
 - **Memory used** shows used physical memory and its percentage of total physical memory.
 - **Disk read** and **Disk write** show rates calculated from the difference between the two newest cumulative I/O samples. Rates are shown as unavailable until two samples exist.
-- **Resource history** plots CPU and memory percentages from recent samples.
-- **Storage** lists mounted volumes and their used capacity.
-- **Applications by memory** lists up to twelve processes, ordered by resident memory use.
+- **Network down** and **Network up** show bytes received and sent per second across all network interfaces, calculated the same way from cumulative network counters.
+- **Resource history** plots CPU and memory percentages. **Live** shows the newest 120 samples and refreshes every 5 seconds. **1 h**, **24 h** and **7 d** show averages over that period, at most 360 points, and refresh every minute. A period can only show samples that are still within the retention policy.
+- **Storage** lists the main volumes: those of at least 10 GB, excluding macOS system volumes other than `/System/Volumes/Data` and `/private/…` mounts. Select **Show all** to include mounted disk images, small external drives and system volumes.
+- An **Attention** box appears under the header when CPU has averaged 90% or more over the last 5 minutes, memory use is 90% or more, a volume of at least 10 GB is 90% or more full, or the battery is at 15% or less while unplugged. Small mounted disk images (such as app installers) and macOS system volumes other than `/System/Volumes/Data` are ignored, because they are normally full. The box disappears once the condition clears.
+- **Swap used** shows how much disk macOS is using as extra memory. Steady growth means the Mac is short of physical memory.
+- **Battery** shows charge and power state, or time remaining on battery while macOS can estimate it. Macs without a battery hide this tile.
+- **Applications by memory** lists up to twelve processes. Select the **Memory** or **CPU** column header to order them by that value. Per-process CPU can exceed 100% because it is summed across cores, as in Activity Monitor, and it reads 0% on the first sample after the sensor starts.
 - The dashboard requests updated data every five seconds.
 
 The header status describes the latest sample/API connection:

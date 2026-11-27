@@ -31,13 +31,13 @@ The sensor and the control agent are host processes managed by `launchd`. The ot
 
 ## Data flow
 
-1. The sensor collects CPU use, virtual and swap memory, mounted volumes and disk usage, cumulative disk I/O, network counters, and process data. It skips processes or mounts that macOS does not permit it to read. It limits its returned process list to thirty entries; the UI displays the twelve largest by memory.
+1. The sensor collects CPU use, virtual and swap memory, mounted volumes and disk usage, cumulative disk I/O, network counters, and process data. It skips processes or mounts that macOS does not permit it to read. It returns the union of the twenty largest processes by memory and the twenty busiest by CPU (at most forty entries), so the UI can show the top twelve by either value. It also reports battery charge, power state and estimated time remaining, or `null` on Macs without a battery.
 2. The poller reads `GET /api/settings` to get its interval, requests `GET /sample` with `X-Sensor-Token`, then posts the resulting JSON to `POST /api/samples` using `Authorization: Bearer <ADMIN_TOKEN>`.
 3. The API validates the sample shape and timestamp (within five minutes of the API clock), records it with an `expires_at` calculated from the current retention setting, and stores it in MongoDB.
 4. The dashboard fetches recent samples and settings through Nginx. The page refreshes sample data every five seconds. Disk rates are computed in the browser from the difference between the newest two cumulative disk I/O records.
 5. The API creates a MongoDB TTL index on `expires_at`. Changing retention recalculates existing records' expiry values; TTL cleanup itself is asynchronous.
 
-The sample payload includes host name, sample time, CPU, memory, swap, disks, disk I/O, network I/O, and applications. MongoDB stores samples in `observatory.samples` and the global polling/retention policy and saved dashboard port in `observatory.settings`.
+The sample payload includes host name, sample time, CPU, memory, swap, disks, disk I/O, network I/O, applications, and battery. MongoDB stores samples in `observatory.samples` and the global polling/retention policy and saved dashboard port in `observatory.settings`.
 
 ### Configuration and restart flow
 
@@ -74,6 +74,7 @@ The agent binds to `127.0.0.1` by default (`CONTROL_BIND`, `CONTROL_PORT`, defau
 | `POST /api/restart` | `Authorization: Bearer <ADMIN_TOKEN>` | Ask the host control agent (`host_control.py`) to apply the saved dashboard port and recreate the Compose services. |
 | `POST /api/samples` | `Authorization: Bearer <ADMIN_TOKEN>` | Validate, timestamp, and store a sample. |
 | `GET /api/samples?limit=N` | None | Return newest samples, default 120, with allowed limits from 1 to 1000. |
+| `GET /api/history?hours=N` | None | Return CPU and memory averages per time bucket for the last N hours (1 to 720, default 1), newest first. MongoDB groups samples with `$dateTrunc` into buckets of at least 10 seconds, sized for at most 360 points. |
 
 The API's interactive OpenAPI/Redoc documentation endpoints are disabled. The API has no published host port in the Compose configuration; the dashboard reaches it through Nginx.
 

@@ -6,7 +6,7 @@ import threading
 import urllib.error
 import urllib.request
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from fastapi import FastAPI, Header, HTTPException, Query, Request
@@ -78,6 +78,7 @@ class Sample(BaseModel):
     disk_io: dict
     network_io: dict
     applications: list[dict]
+    battery: dict | None = None
 
 
 @asynccontextmanager
@@ -156,6 +157,40 @@ def get_samples(limit: int = Query(120, ge=1, le=1000)):
         doc["sampled_at"] = doc["sampled_at"].replace(tzinfo=timezone.utc).isoformat()
         result.append(doc)
     return result
+
+
+HISTORY_MAX_POINTS = 360
+
+
+def history_bucket_seconds(hours):
+    """Bucket width that keeps a history range at or under HISTORY_MAX_POINTS points."""
+    return max(10, -(-hours * 3600 // HISTORY_MAX_POINTS))
+
+
+@app.get("/api/history")
+def get_history(hours: int = Query(1, ge=1, le=720)):
+    """CPU and memory averages per time bucket, newest first, for long chart ranges."""
+    bucket = history_bucket_seconds(hours)
+    since = datetime.now(timezone.utc) - timedelta(hours=hours)
+    pipeline = [
+        {"$match": {"sampled_at": {"$gte": since}}},
+        {"$group": {
+            "_id": {"$dateTrunc": {"date": "$sampled_at", "unit": "second", "binSize": bucket}},
+            "cpu_percent": {"$avg": "$cpu_percent"},
+            "memory_percent": {"$avg": "$memory.percent"},
+            "samples": {"$sum": 1},
+        }},
+        {"$sort": {"_id": DESCENDING}},
+    ]
+    return [
+        {
+            "sampled_at": row["_id"].replace(tzinfo=timezone.utc).isoformat(),
+            "cpu_percent": round(row["cpu_percent"] or 0, 1),
+            "memory": {"percent": round(row["memory_percent"] or 0, 1)},
+            "samples": row["samples"],
+        }
+        for row in samples.aggregate(pipeline)
+    ]
 
 
 @app.middleware("http")
