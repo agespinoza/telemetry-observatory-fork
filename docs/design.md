@@ -74,6 +74,7 @@ The agent binds to `127.0.0.1` by default (`CONTROL_BIND`, `CONTROL_PORT`, defau
 | `POST /api/restart` | `Authorization: Bearer <ADMIN_TOKEN>` | Ask the host control agent (`host_control.py`) to apply the saved dashboard port and recreate the Compose services. |
 | `POST /api/samples` | `Authorization: Bearer <ADMIN_TOKEN>` | Validate, timestamp, and store a sample. |
 | `GET /api/samples?limit=N` | None | Return newest samples, default 120, with allowed limits from 1 to 1000. |
+| `GET /api/history?hours=N` | None | Return CPU and memory averages per time bucket for the last N hours (1 to 720, default 1), newest first. MongoDB groups samples with `$dateTrunc` into buckets of at least 10 seconds, sized for at most 360 points. |
 
 The API's interactive OpenAPI/Redoc documentation endpoints are disabled. The API has no published host port in the Compose configuration; the dashboard reaches it through Nginx.
 

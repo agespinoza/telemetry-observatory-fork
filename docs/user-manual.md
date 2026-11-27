@@ -18,7 +18,7 @@ docker compose ps
 - **Memory used** shows used physical memory and its percentage of total physical memory.
 - **Disk read** and **Disk write** show rates calculated from the difference between the two newest cumulative I/O samples. Rates are shown as unavailable until two samples exist.
 - **Network down** and **Network up** show bytes received and sent per second across all network interfaces, calculated the same way from cumulative network counters.
-- **Resource history** plots CPU and memory percentages from recent samples.
+- **Resource history** plots CPU and memory percentages. **Live** shows the newest 120 samples and refreshes every 5 seconds. **1 h**, **24 h** and **7 d** show averages over that period, at most 360 points, and refresh every minute. A period can only show samples that are still within the retention policy.
 - **Storage** lists mounted volumes and their used capacity.
 - **Applications by memory** lists up to twelve processes, ordered by resident memory use.
 - The dashboard requests updated data every five seconds.
