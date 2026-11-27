@@ -1,0 +1,46 @@
+name: telemetry-observatory
+services:
+  mongo:
+    image: mongo:7
+    restart: unless-stopped
+    command: ["mongod", "--logpath", "/audits/mongo.log", "--logappend", "--bind_ip_all"]
+    volumes: ["mongo_data:/data/db", "./audits:/audits"]
+    networks: [private]
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+  api:
+    build: {context: ., dockerfile: api/Dockerfile}
+    restart: unless-stopped
+    environment:
+      MONGO_URI: mongodb://mongo:27017
+      ADMIN_TOKEN: ${ADMIN_TOKEN:?Set ADMIN_TOKEN in .env}
+      AUDIT_PATH: /audits/api.jsonl
+    volumes: ["./audits:/audits"]
+    depends_on: {mongo: {condition: service_healthy}}
+    networks: [private]
+  poller:
+    build: {context: ., dockerfile: poller/Dockerfile}
+    restart: unless-stopped
+    environment:
+      API_URL: http://api:8000
+      SENSOR_URL: http://host.docker.internal:${SENSOR_PORT:-8765}/sample
+      ADMIN_TOKEN: ${ADMIN_TOKEN:?Set ADMIN_TOKEN in .env}
+      SENSOR_TOKEN: ${SENSOR_TOKEN:?Set SENSOR_TOKEN in .env}
+      AUDIT_PATH: /audits/poller.jsonl
+    volumes: ["./audits:/audits"]
+    depends_on: [api]
+    networks: [private]
+  dashboard:
+    build: ./web
+    restart: unless-stopped
+    ports: ["127.0.0.1:${DASHBOARD_PORT:-8080}:80"]
+    volumes: ["./audits:/audits"]
+    depends_on: [api]
+    networks: [private]
+networks:
+  private: {}
+volumes:
+  mongo_data: {}
