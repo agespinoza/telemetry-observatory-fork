@@ -1,0 +1,71 @@
+# Telemetry Observatory
+
+A local dashboard for CPU, memory, disk activity, storage, and processes on one macOS host. Open <http://127.0.0.1:8080> after setup.
+
+## Requirements and dependencies
+
+- macOS
+- Python 3.11 or newer for the host sensor and local tests. Install it from [python.org](https://www.python.org/downloads/macos/) or a trusted package manager.
+- [Docker Desktop for Mac](https://www.docker.com/products/docker-desktop/) with Docker Compose v2, running before startup.
+- Network access on first setup to obtain Python packages from PyPI and container images from Docker Hub.
+
+Python packages are pinned in the requirements files:
+
+| Component | Dependencies | Obtain/install |
+| --- | --- | --- |
+| macOS host sensor | `psutil==7.0.0` | Installed from PyPI by `python3 -m pip install -r requirements-dev.txt` |
+| API | `fastapi==0.115.12`, `uvicorn==0.34.2`, `pymongo==4.12.1` | Installed from PyPI when the API image is built |
+| Poller | `requests==2.32.3` | Installed from PyPI when the poller image is built |
+| Local tests | `pytest==8.3.5`, `httpx==0.28.1` | Installed from PyPI by `python3 -m pip install -r requirements-dev.txt` |
+
+`requirements-dev.txt` includes both service requirement files. Docker Compose builds the API and poller on `python:3.12-slim`, uses `nginx:1.27-alpine` for the dashboard, and pulls `mongo:7` for storage. Docker Desktop supplies the Docker CLI and Compose; Compose obtains these images from Docker Hub during the first build/start.
+
+## Setup
+
+From the project directory:
+
+```sh
+python3 -m venv .venv
+.venv/bin/python -m pip install -r requirements-dev.txt
+cp .env.example .env
+```
+
+Edit `.env` and replace both example values with different random secrets of at least 24 characters. For example, generate each value with:
+
+```sh
+python3 -c 'import secrets; print(secrets.token_urlsafe(36))'
+```
+
+Keep `.env` private. Install and start the native macOS sensor, then build and start the containers:
+
+```sh
+./scripts/install-sensor.sh
+docker compose up -d --build
+```
+
+The script registers the host sensor with `launchd`; it runs in the background and can read macOS host counters that containers cannot access. Docker Compose exposes the dashboard only on `127.0.0.1`. The sensor listens on port `8765` by default so Docker Desktop can reach it and requires `SENSOR_TOKEN`.
+
+For detailed usage and troubleshooting, see the [user manual](docs/user-manual.md). The component map, data flow, interfaces, and operational constraints are in the [design document](docs/design.md).
+
+## Common operations
+
+```sh
+docker compose ps
+docker compose logs --tail=100 api poller dashboard mongo
+.venv/bin/python -m pytest -q
+docker compose restart api poller dashboard
+docker compose down       # stops containers; preserves MongoDB data
+docker compose down -v    # also deletes the MongoDB data volume
+```
+
+To stop the host sensor:
+
+```sh
+launchctl bootout "gui/$(id -u)/com.telemetry-observatory.sensor"
+```
+
+Re-run `./scripts/install-sensor.sh` after changing `.env` or moving the project directory. MongoDB removes expired samples asynchronously according to the configured retention policy. Back up the Compose MongoDB volume before deleting it.
+
+## Data collection notes
+
+The sensor uses `psutil` to collect CPU, physical and swap memory, disk capacity and I/O counters, network counters, and process information. The dashboard displays CPU, physical memory, disk read/write rates, mounted-volume usage, resource history, and the twelve processes using the most memory. macOS may deny access to some processes or volumes; those entries are skipped. The dashboard reports this Mac only and does not aggregate remote hosts.
