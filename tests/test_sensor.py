@@ -1,6 +1,9 @@
 from types import SimpleNamespace
+import plistlib
+import subprocess
 
 import host_sensor
+import pytest
 
 
 def test_collect_skips_inaccessible_volume_and_process(monkeypatch):
@@ -23,10 +26,53 @@ def test_collect_skips_inaccessible_volume_and_process(monkeypatch):
     monkeypatch.setattr(host_sensor.psutil, 'disk_io_counters', lambda: None)
     monkeypatch.setattr(host_sensor.psutil, 'net_io_counters', lambda: None)
     monkeypatch.setattr(host_sensor.psutil, 'sensors_battery', lambda: None)
+    monkeypatch.setattr(host_sensor, 'gpu_percent', lambda: 37)
     result = host_sensor.collect()
     assert result['disks'][0]['mount'] == '/'
     assert len(result['disks']) == 1
     assert result['applications'][0]['pid'] == 7
+    assert result['gpu_percent'] == 37
+
+
+@pytest.mark.parametrize('value', [0, 37, 100])
+def test_gpu_percent_reads_ioreg(monkeypatch, value):
+    def run(command, **kwargs):
+        assert command == ['/usr/sbin/ioreg', '-r', '-c', 'IOAccelerator', '-d', '1', '-a']
+        assert kwargs == {'capture_output': True, 'check': True, 'timeout': 5}
+        return SimpleNamespace(stdout=plistlib.dumps([{}, {'PerformanceStatistics': {'Device Utilization %': value}}]))
+
+    monkeypatch.setattr(host_sensor.subprocess, 'run', run)
+    assert host_sensor.gpu_percent() == value
+
+
+@pytest.mark.parametrize('value', [True, -1, 101, '42', None])
+def test_gpu_percent_unavailable_is_audited(monkeypatch, value):
+    stats = {} if value is None else {'Device Utilization %': value}
+    monkeypatch.setattr(host_sensor.subprocess, 'run', lambda *args, **kwargs: SimpleNamespace(stdout=plistlib.dumps([{'PerformanceStatistics': stats}])))
+    events = []
+    monkeypatch.setattr(host_sensor, 'audit', lambda *args: events.append(args))
+    assert host_sensor.gpu_percent() is None
+    assert events[0][:2] == ('gpu.read', 'error')
+
+
+@pytest.mark.parametrize('failure', [subprocess.TimeoutExpired('ioreg', 5), subprocess.CalledProcessError(1, 'ioreg'), OSError('missing')])
+def test_gpu_percent_command_failure_is_audited(monkeypatch, failure):
+    def run(*args, **kwargs):
+        raise failure
+
+    monkeypatch.setattr(host_sensor.subprocess, 'run', run)
+    events = []
+    monkeypatch.setattr(host_sensor, 'audit', lambda *args: events.append(args))
+    assert host_sensor.gpu_percent() is None
+    assert events[0] == ('gpu.read', 'error', {'type': type(failure).__name__})
+
+
+def test_gpu_percent_malformed_plist_is_audited(monkeypatch):
+    monkeypatch.setattr(host_sensor.subprocess, 'run', lambda *args, **kwargs: SimpleNamespace(stdout=b'<?xml version="1.0"?><plist>'))
+    events = []
+    monkeypatch.setattr(host_sensor, 'audit', lambda *args: events.append(args))
+    assert host_sensor.gpu_percent() is None
+    assert events[0][:2] == ('gpu.read', 'error')
 
 
 def test_top_applications_keeps_busy_low_memory_process():

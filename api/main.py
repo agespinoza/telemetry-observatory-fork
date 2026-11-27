@@ -72,6 +72,7 @@ class Sample(BaseModel):
     host: str = Field(min_length=1, max_length=128)
     sampled_at: datetime
     cpu_percent: float = Field(ge=0, le=100)
+    gpu_percent: float | None = Field(default=None, ge=0, le=100)
     memory: dict
     swap: dict
     disks: list[dict]

@@ -1,12 +1,16 @@
 """Native macOS adapter. Docker Desktop cannot see macOS host counters."""
 import json
+import math
 import os
+import plistlib
 import secrets
 import socket
+import subprocess
 import threading
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from xml.parsers.expat import ExpatError
 
 import psutil
 
@@ -44,6 +48,27 @@ def top_applications(applications, limit=20):
     return sorted(chosen.values(), key=lambda app: app["memory_bytes"], reverse=True)
 
 
+def gpu_percent():
+    try:
+        result = subprocess.run(
+            ["/usr/sbin/ioreg", "-r", "-c", "IOAccelerator", "-d", "1", "-a"],
+            capture_output=True, check=True, timeout=5,
+        )
+        devices = plistlib.loads(result.stdout)
+    except (subprocess.SubprocessError, OSError, plistlib.InvalidFileException, ExpatError, ValueError, TypeError) as exc:
+        audit("gpu.read", "error", {"type": type(exc).__name__})
+        return None
+
+    if isinstance(devices, list):
+        for device in devices:
+            stats = device.get("PerformanceStatistics") if isinstance(device, dict) else None
+            value = stats.get("Device Utilization %") if isinstance(stats, dict) else None
+            if isinstance(value, (int, float)) and not isinstance(value, bool) and 0 <= value <= 100 and math.isfinite(value):
+                return value
+    audit("gpu.read", "error", {"message": "GPU utilization unavailable"})
+    return None
+
+
 def collect():
     disks = []
     seen = set()
@@ -63,7 +88,7 @@ def collect():
             applications.append({"pid": info["pid"], "name": info["name"] or "unknown", "memory_bytes": info["memory_info"].rss if info["memory_info"] else 0, "cpu_percent": info["cpu_percent"] or 0})
         except (psutil.NoSuchProcess, psutil.AccessDenied, OSError):
             pass
-    return {"host": socket.gethostname(), "sampled_at": datetime.now(timezone.utc).isoformat(), "cpu_percent": psutil.cpu_percent(interval=0.1), "memory": counter(psutil.virtual_memory()), "swap": counter(psutil.swap_memory()), "disks": disks, "disk_io": counter(psutil.disk_io_counters()), "network_io": counter(psutil.net_io_counters()), "applications": top_applications(applications), "battery": battery()}
+    return {"host": socket.gethostname(), "sampled_at": datetime.now(timezone.utc).isoformat(), "cpu_percent": psutil.cpu_percent(interval=0.1), "gpu_percent": gpu_percent(), "memory": counter(psutil.virtual_memory()), "swap": counter(psutil.swap_memory()), "disks": disks, "disk_io": counter(psutil.disk_io_counters()), "network_io": counter(psutil.net_io_counters()), "applications": top_applications(applications), "battery": battery()}
 
 
 class Handler(BaseHTTPRequestHandler):

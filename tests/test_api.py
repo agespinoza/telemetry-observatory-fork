@@ -2,8 +2,41 @@ from datetime import datetime, timezone
 
 import pytest
 from fastapi import HTTPException
+from pydantic import ValidationError
 
 from api import main
+
+
+def test_gpu_sample_is_validated_and_stored(monkeypatch, tmp_path):
+    monkeypatch.setenv('ADMIN_TOKEN', 'a' * 32)
+    monkeypatch.setattr(main, 'audit_path', tmp_path / 'api.jsonl')
+    monkeypatch.setattr(main, 'current_policy', lambda: {'retention_days': 7})
+    stored = []
+
+    class Samples:
+        def insert_one(self, item):
+            stored.append(item)
+
+        def find(self, query, projection):
+            return self
+
+        def sort(self, key, direction):
+            return self
+
+        def limit(self, count):
+            return stored[:count]
+
+    monkeypatch.setattr(main, 'samples', Samples())
+    data = {'host': 'mac', 'sampled_at': datetime.now(timezone.utc), 'cpu_percent': 10, 'gpu_percent': 37,
+            'memory': {}, 'swap': {}, 'disks': [], 'disk_io': {}, 'network_io': {}, 'applications': []}
+    main.post_sample(main.Sample(**data), 'Bearer ' + 'a' * 32)
+    assert stored[0]['gpu_percent'] == 37
+    assert main.get_samples(1)[0]['gpu_percent'] == 37
+    data.pop('gpu_percent')
+    assert main.Sample(**data).gpu_percent is None
+    for invalid in (-1, 101):
+        with pytest.raises(ValidationError):
+            main.Sample(**data, gpu_percent=invalid)
 
 
 def test_admin_rejects_invalid_token(monkeypatch, tmp_path):

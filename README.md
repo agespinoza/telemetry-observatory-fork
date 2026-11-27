@@ -1,6 +1,6 @@
 # Telemetry Observatory
 
-A local dashboard for CPU, memory, disk activity, storage, and processes on one macOS host. Open <http://127.0.0.1:8080> after setup.
+A local dashboard for CPU, GPU, memory, disk activity, storage, and processes on one macOS host. Open <http://127.0.0.1:8080> after setup.
 
 ## Requirements and dependencies
 
@@ -74,6 +74,8 @@ launchctl bootout "gui/$(id -u)/com.telemetry-observatory.control"
 
 Re-run `./scripts/install-sensor.sh` (and `./scripts/install-control.sh` when `CONTROL_PORT` changes) after changing `.env` or moving the project directory. MongoDB removes expired samples asynchronously according to the configured retention policy. Back up the Compose MongoDB volume before deleting it.
 
+After updating the application code, run `./scripts/install-sensor.sh` to restart the native sensor and `docker compose up -d --build` to rebuild and restart the containers.
+
 ## Data collection notes
 
-The sensor uses `psutil` to collect CPU, physical and swap memory, disk capacity and I/O counters, network counters, battery state, and process information. The dashboard displays CPU, physical memory, disk read/write rates, network download/upload rates, swap use, battery state, mounted-volume usage, resource history, and the twelve processes using the most memory or CPU. macOS may deny access to some processes or volumes; those entries are skipped. The dashboard reports this Mac only and does not aggregate remote hosts.
+The sensor uses `psutil` to collect CPU, physical and swap memory, disk capacity and I/O counters, network counters, battery state, and process information. It reads GPU device utilization from macOS IORegistry using `ioreg`, without administrator privileges. The dashboard displays CPU and GPU utilization, physical memory, disk read/write rates, network download/upload rates, swap use, battery state, mounted-volume usage, resource history, and the twelve processes using the most memory or CPU. GPU utilization is unavailable on systems that do not expose the counter; macOS may deny access to some processes or volumes, which are skipped. The dashboard reports this Mac only and does not aggregate remote hosts.

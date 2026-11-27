@@ -15,6 +15,7 @@ docker compose ps
 ## Read the dashboard
 
 - **CPU utilization** shows current CPU use.
+- **GPU Utilization** shows the first available GPU device utilization percentage reported by macOS, next to CPU. A dash means the counter is unavailable or the sample predates GPU collection; check `audits/sensor.jsonl` for `gpu.read` errors.
 - **Memory used** shows used physical memory and its percentage of total physical memory.
 - **Disk read** and **Disk write** show rates calculated from the difference between the two newest cumulative I/O samples. Rates are shown as unavailable until two samples exist.
 - **Network down** and **Network up** show bytes received and sent per second across all network interfaces, calculated the same way from cumulative network counters.

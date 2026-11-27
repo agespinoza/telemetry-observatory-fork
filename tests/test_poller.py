@@ -25,10 +25,10 @@ def test_poller_uses_current_frequency_and_passes_sample(monkeypatch, tmp_path):
             if url.endswith('/api/settings'):
                 return Response({'frequency_seconds': 15})
             assert kwargs['headers']['X-Sensor-Token'] == 'sensor-secret'
-            return Response({'host': 'mac'})
+            return Response({'host': 'mac', 'gpu_percent': 37})
 
         def post(self, url, **kwargs):
-            assert kwargs['json'] == {'host': 'mac'}
+            assert kwargs['json'] == {'host': 'mac', 'gpu_percent': 37}
             assert kwargs['headers']['Authorization'] == 'Bearer admin-secret'
             return Response({'status': 'stored'})
 
