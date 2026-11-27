@@ -170,7 +170,7 @@ def history_bucket_seconds(hours):
 
 @app.get("/api/history")
 def get_history(hours: int = Query(1, ge=1, le=720)):
-    """CPU and memory averages per time bucket, newest first, for long chart ranges."""
+    """CPU, GPU, and memory averages per time bucket, newest first, for long chart ranges."""
     bucket = history_bucket_seconds(hours)
     since = datetime.now(timezone.utc) - timedelta(hours=hours)
     pipeline = [
@@ -178,6 +178,7 @@ def get_history(hours: int = Query(1, ge=1, le=720)):
         {"$group": {
             "_id": {"$dateTrunc": {"date": "$sampled_at", "unit": "second", "binSize": bucket}},
             "cpu_percent": {"$avg": "$cpu_percent"},
+            "gpu_percent": {"$avg": "$gpu_percent"},
             "memory_percent": {"$avg": "$memory.percent"},
             "samples": {"$sum": 1},
         }},
@@ -187,6 +188,7 @@ def get_history(hours: int = Query(1, ge=1, le=720)):
         {
             "sampled_at": row["_id"].replace(tzinfo=timezone.utc).isoformat(),
             "cpu_percent": round(row["cpu_percent"] or 0, 1),
+            "gpu_percent": round(row["gpu_percent"], 1) if row["gpu_percent"] is not None else None,
             "memory": {"percent": round(row["memory_percent"] or 0, 1)},
             "samples": row["samples"],
         }

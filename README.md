@@ -6,6 +6,7 @@ A local dashboard for CPU, GPU, memory, disk activity, storage, and processes on
 
 - macOS
 - Python 3.11 or newer for the host sensor and local tests. Install it from [python.org](https://www.python.org/downloads/macos/) or a trusted package manager.
+- Node.js for the dashboard chart unit test; the test is skipped when Node.js is unavailable.
 - [Docker Desktop for Mac](https://www.docker.com/products/docker-desktop/) with Docker Compose v2, running before startup.
 - Network access on first setup to obtain Python packages from PyPI and container images from Docker Hub.
 

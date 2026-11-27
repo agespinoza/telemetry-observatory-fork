@@ -93,8 +93,9 @@ def test_history_returns_bucket_averages_newest_first(monkeypatch):
         def aggregate(self, pipeline):
             self.pipeline = pipeline
             return [
-                {'_id': datetime(2026, 1, 1, 12, 4), 'cpu_percent': 12.345, 'memory_percent': 55.55, 'samples': 24},
-                {'_id': datetime(2026, 1, 1, 12, 0), 'cpu_percent': None, 'memory_percent': 50.0, 'samples': 1},
+                {'_id': datetime(2026, 1, 1, 12, 4), 'cpu_percent': 12.345, 'gpu_percent': 37.46, 'memory_percent': 55.55, 'samples': 24},
+                {'_id': datetime(2026, 1, 1, 12, 0), 'cpu_percent': None, 'gpu_percent': None, 'memory_percent': 50.0, 'samples': 1},
+                {'_id': datetime(2026, 1, 1, 11, 56), 'cpu_percent': 0, 'gpu_percent': 0, 'memory_percent': 50.0, 'samples': 1},
             ]
 
     fake = Samples()
@@ -102,6 +103,9 @@ def test_history_returns_bucket_averages_newest_first(monkeypatch):
     result = main.get_history(24)
     group = fake.pipeline[1]['$group']
     assert group['_id']['$dateTrunc']['binSize'] == 240
+    assert group['gpu_percent'] == {'$avg': '$gpu_percent'}
     assert fake.pipeline[-1] == {'$sort': {'_id': main.DESCENDING}}
-    assert result[0] == {'sampled_at': '2026-01-01T12:04:00+00:00', 'cpu_percent': 12.3, 'memory': {'percent': 55.5}, 'samples': 24}
+    assert result[0] == {'sampled_at': '2026-01-01T12:04:00+00:00', 'cpu_percent': 12.3, 'gpu_percent': 37.5, 'memory': {'percent': 55.5}, 'samples': 24}
     assert result[1]['cpu_percent'] == 0
+    assert result[1]['gpu_percent'] is None
+    assert result[2]['gpu_percent'] == 0
