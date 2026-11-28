@@ -7,7 +7,8 @@ import secrets
 import socket
 import subprocess
 import threading
-from datetime import datetime, timezone
+import urllib.request
+from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from xml.parsers.expat import ExpatError
@@ -69,6 +70,83 @@ def gpu_percent():
     return None
 
 
+LOCAL_AI_PROCESS_NAMES = ("ollama", "llama-server", "llama.cpp", "lm studio", "lmstudio", "mlx_lm", "localai")
+
+
+def _int(value):
+    return int(value) if isinstance(value, (int, float)) and not isinstance(value, bool) and value > 0 else 0
+
+
+def ollama_status(base=None, timeout=1.5):
+    """Ollama version and loaded models, with the share of each model held in GPU memory."""
+    base = (base or os.getenv("OLLAMA_URL", "http://127.0.0.1:11434")).rstrip("/")
+    try:
+        with urllib.request.urlopen(f"{base}/api/version", timeout=timeout) as response:
+            version = json.loads(response.read())
+        with urllib.request.urlopen(f"{base}/api/ps", timeout=timeout) as response:
+            ps = json.loads(response.read())
+    except (OSError, ValueError) as exc:
+        audit("ollama.read", "error", {"type": type(exc).__name__})
+        return {"reachable": False, "version": None, "models": []}
+    models = []
+    listed = ps.get("models") if isinstance(ps, dict) else None
+    for model in listed if isinstance(listed, list) else []:
+        if not isinstance(model, dict):
+            continue
+        details = model.get("details") if isinstance(model.get("details"), dict) else {}
+        size, vram = _int(model.get("size")), _int(model.get("size_vram"))
+        models.append({
+            "name": str(model.get("name") or "unknown"), "size": size, "size_vram": vram,
+            "gpu_percent": round(min(100, 100 * vram / size), 1) if size and isinstance(model.get("size_vram"), (int, float)) and not isinstance(model.get("size_vram"), bool) and model["size_vram"] >= 0 else None,
+            "expires_at": model.get("expires_at") if isinstance(model.get("expires_at"), str) else None,
+            "parameter_size": details.get("parameter_size"), "quantization": details.get("quantization_level"),
+        })
+    version = version.get("version") if isinstance(version, dict) else None
+    return {"reachable": True, "version": version if isinstance(version, str) else None, "models": models}
+
+
+def token_usage(path=None, hours=24, now=None):
+    """Local vs remote model invocations and tokens from the token-telemetry JSONL log, or None without a log."""
+    path = Path(path or os.getenv("TOKEN_TELEMETRY_PATH", str(Path.home() / ".agents/data/token-telemetry/telemetry.jsonl")))
+    since = (now or datetime.now(timezone.utc)) - timedelta(hours=hours)
+    totals = {key: {"invocations": 0, "tokens": 0} for key in ("local", "remote", "unknown")}
+    last_at, last_model = None, None
+    try:
+        with path.open(encoding="utf-8") as lines:
+            for line in lines:
+                try:
+                    record = json.loads(line)
+                    at = datetime.fromisoformat(str(record["timestamp"]).replace("Z", "+00:00"))
+                except (ValueError, KeyError, TypeError):
+                    continue
+                if not isinstance(record, dict) or record.get("record_type") != "invocation":
+                    continue
+                at = at if at.tzinfo else at.replace(tzinfo=timezone.utc)
+                if at < since:
+                    continue
+                where = record.get("execution_location") if record.get("execution_location") in ("local", "remote") else "unknown"
+                totals[where]["invocations"] += 1
+                tokens = record.get("total_tokens")
+                if isinstance(tokens, int) and not isinstance(tokens, bool) and tokens >= 0:
+                    totals[where]["tokens"] += tokens
+                if where == "local" and (last_at is None or at > last_at):
+                    last_at, last_model = at, record.get("model")
+    except OSError:
+        return None
+    measured = totals["local"]["tokens"] + totals["remote"]["tokens"]
+    return {"window_hours": hours, **totals,
+            "local_share": round(100 * totals["local"]["tokens"] / measured, 1) if measured else None,
+            "last_local_at": last_at.isoformat() if last_at else None,
+            "last_local_model": last_model if isinstance(last_model, str) else None}
+
+
+def local_ai(applications):
+    """Local model runtimes: Ollama state, inference processes, and token-telemetry usage."""
+    processes = [app for app in applications if any(name in app["name"].lower() for name in LOCAL_AI_PROCESS_NAMES)]
+    processes.sort(key=lambda app: app["cpu_percent"], reverse=True)
+    return {"ollama": ollama_status(), "processes": processes[:8], "tokens": token_usage()}
+
+
 def collect():
     disks = []
     seen = set()
@@ -88,7 +166,7 @@ def collect():
             applications.append({"pid": info["pid"], "name": info["name"] or "unknown", "memory_bytes": info["memory_info"].rss if info["memory_info"] else 0, "cpu_percent": info["cpu_percent"] or 0})
         except (psutil.NoSuchProcess, psutil.AccessDenied, OSError):
             pass
-    return {"host": socket.gethostname(), "sampled_at": datetime.now(timezone.utc).isoformat(), "cpu_percent": psutil.cpu_percent(interval=0.1), "gpu_percent": gpu_percent(), "memory": counter(psutil.virtual_memory()), "swap": counter(psutil.swap_memory()), "disks": disks, "disk_io": counter(psutil.disk_io_counters()), "network_io": counter(psutil.net_io_counters()), "applications": top_applications(applications), "battery": battery()}
+    return {"host": socket.gethostname(), "sampled_at": datetime.now(timezone.utc).isoformat(), "cpu_percent": psutil.cpu_percent(interval=0.1), "gpu_percent": gpu_percent(), "memory": counter(psutil.virtual_memory()), "swap": counter(psutil.swap_memory()), "disks": disks, "disk_io": counter(psutil.disk_io_counters()), "network_io": counter(psutil.net_io_counters()), "applications": top_applications(applications), "battery": battery(), "local_ai": local_ai(applications)}
 
 
 class Handler(BaseHTTPRequestHandler):
