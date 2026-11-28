@@ -226,6 +226,18 @@ def test_token_usage_reads_only_appended_lines(tmp_path, monkeypatch):
     assert host_sensor.token_usage(log, now=NOW)["local"]["invocations"] == 2
 
 
+def test_token_usage_detects_truncation_followed_by_regrowth(tmp_path):
+    log = tmp_path / "telemetry.jsonl"
+    log.write_text(CALL.format(at="2026-01-01T12:00:00Z", where="local") * 2)
+    assert host_sensor.token_usage(log, now=NOW)["local"]["invocations"] == 2
+    inode = log.stat().st_ino
+    with log.open("w") as out:  # truncate in place, same inode, then grow past the old offset
+        out.write(CALL.format(at="2026-01-01T12:05:00Z", where="remote") * 3)
+    assert log.stat().st_ino == inode
+    result = host_sensor.token_usage(log, now=NOW)
+    assert (result["local"]["invocations"], result["remote"]["invocations"]) == (0, 3)
+
+
 def test_token_usage_rereads_rotated_log_and_drops_expired(tmp_path):
     log = tmp_path / "telemetry.jsonl"
     log.write_text(CALL.format(at="2026-01-01T12:00:00Z", where="local") + CALL.format(at="2026-01-01T12:01:00Z", where="local"))

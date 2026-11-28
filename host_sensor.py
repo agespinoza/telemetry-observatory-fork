@@ -125,6 +125,14 @@ def _token_record(raw):
     return at, where, tokens, record.get("model")
 
 
+def _token_log_checkpoint(log, offset, size=512):
+    """The first and last bytes already consumed, used to detect a log truncated in place and regrown."""
+    log.seek(0)
+    head = log.read(min(size, offset))
+    log.seek(max(0, offset - size))
+    return head, log.read(min(size, offset))
+
+
 def token_usage(path=None, hours=24, now=None):
     """Local vs remote model invocations and tokens from the token-telemetry JSONL log, or None without a log.
 
@@ -139,8 +147,9 @@ def token_usage(path=None, hours=24, now=None):
             with path.open("rb") as log:
                 stat = os.fstat(log.fileno())
                 state = _TOKEN_LOGS.get(str(path))
-                if state is None or state["inode"] != (stat.st_dev, stat.st_ino) or stat.st_size < state["offset"]:
-                    state = {"inode": (stat.st_dev, stat.st_ino), "offset": 0, "records": []}
+                if (state is None or state["inode"] != (stat.st_dev, stat.st_ino) or stat.st_size < state["offset"]
+                        or _token_log_checkpoint(log, state["offset"]) != state["checkpoint"]):
+                    state = {"inode": (stat.st_dev, stat.st_ino), "offset": 0, "records": [], "checkpoint": (b"", b"")}
                 log.seek(state["offset"])
                 for raw in log:
                     record = _token_record(raw)
@@ -149,6 +158,7 @@ def token_usage(path=None, hours=24, now=None):
                     state["offset"] += len(raw)
                     if record and record[0] >= since:
                         state["records"].append(record)
+                state["checkpoint"] = _token_log_checkpoint(log, state["offset"])
         except OSError:
             _TOKEN_LOGS.pop(str(path), None)
             return None
