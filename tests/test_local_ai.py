@@ -177,6 +177,13 @@ assert.match(obs.map(o => o[0]).join('\n'), /likely local inference.*device-wide
 const partial = {local: {invocations: 2, tokens: 0, unmeasured: 2}, remote: {invocations: 0, tokens: 0, unmeasured: 0}, local_share: null, last_local_at: null};
 obs = context.aiObservations([sample(0, [], {tokens: partial})]);
 assert.match(obs.map(o => o[0]).join('\n'), /2 model calls .* no token count/);
+const unknownOnly = {local: {invocations: 0, tokens: 0}, remote: {invocations: 0, tokens: 0}, unknown: {invocations: 3, tokens: 0}, local_share: null, last_local_at: null};
+text = context.aiObservations([sample(0, [], {tokens: unknownOnly})]).map(o => o[0]).join('\n');
+assert.match(text, /3 model calls .* no recorded execution location/);
+assert.doesNotMatch(text, /has no model calls/);
+const mixed = {local: {invocations: 0, tokens: 0}, remote: {invocations: 2, tokens: 20}, unknown: {invocations: 1, tokens: 0}, local_share: 0, last_local_at: null};
+text = context.aiObservations([sample(0, [], {tokens: mixed})]).map(o => o[0]).join('\n');
+assert.doesNotMatch(text, /not being delegated locally/);
 """
     subprocess.run(['node', '-e', script, str(dashboard)], check=True)
 
@@ -191,7 +198,40 @@ def test_token_usage_counts_unmeasured_calls(tmp_path):
     assert result["local"] == {"invocations": 2, "tokens": 0, "unmeasured": 1}
 
 
-def test_token_usage_invalid_utf8_is_unavailable(tmp_path):
+CALL = '{{"timestamp": "{at}", "record_type": "invocation", "execution_location": "{where}", "total_tokens": 10}}\n'
+NOW = datetime(2026, 1, 1, 13, tzinfo=timezone.utc)
+
+
+def test_token_usage_skips_invalid_utf8_lines(tmp_path):
     log = tmp_path / "telemetry.jsonl"
-    log.write_bytes(b'{"timestamp": "2026-01-01T12:00:00Z"}\n\xff\xfe broken\n')
-    assert host_sensor.token_usage(log) is None
+    log.write_bytes(b"\xff\xfe broken\n" + CALL.format(at="2026-01-01T12:00:00Z", where="local").encode())
+    assert host_sensor.token_usage(log, now=NOW)["local"]["invocations"] == 1
+
+
+def test_token_usage_reads_only_appended_lines(tmp_path, monkeypatch):
+    log = tmp_path / "telemetry.jsonl"
+    log.write_text(CALL.format(at="2026-01-01T12:00:00Z", where="local"))
+    assert host_sensor.token_usage(log, now=NOW)["local"]["invocations"] == 1
+    parsed = []
+    original = host_sensor._token_record
+    monkeypatch.setattr(host_sensor, "_token_record", lambda raw: parsed.append(raw) or original(raw))
+    with log.open("a") as out:
+        out.write(CALL.format(at="2026-01-01T12:30:00Z", where="remote"))
+        out.write('{"timestamp": "2026-01-01T12:4')
+    result = host_sensor.token_usage(log, now=NOW)
+    assert (result["local"]["invocations"], result["remote"]["invocations"]) == (1, 1)
+    assert len(parsed) == 2  # the appended record and the partial line, not the first record again
+    with log.open("a") as out:
+        out.write('5:00Z", "record_type": "invocation", "execution_location": "local", "total_tokens": 1}\n')
+    assert host_sensor.token_usage(log, now=NOW)["local"]["invocations"] == 2
+
+
+def test_token_usage_rereads_rotated_log_and_drops_expired(tmp_path):
+    log = tmp_path / "telemetry.jsonl"
+    log.write_text(CALL.format(at="2026-01-01T12:00:00Z", where="local") + CALL.format(at="2026-01-01T12:01:00Z", where="local"))
+    assert host_sensor.token_usage(log, now=NOW)["local"]["invocations"] == 2
+    log.unlink()
+    log.write_text(CALL.format(at="2026-01-01T12:02:00Z", where="remote"))
+    result = host_sensor.token_usage(log, now=NOW)
+    assert (result["local"]["invocations"], result["remote"]["invocations"]) == (0, 1)
+    assert host_sensor.token_usage(log, now=datetime(2026, 1, 3, tzinfo=timezone.utc))["remote"]["invocations"] == 0

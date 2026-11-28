@@ -105,36 +105,66 @@ def ollama_status(base=None, timeout=1.5):
     return {"reachable": True, "version": version if isinstance(version, str) else None, "models": models}
 
 
+_TOKEN_LOGS = {}
+_TOKEN_LOGS_LOCK = threading.Lock()
+
+
+def _token_record(raw):
+    """(timestamp, location, tokens or None, model) for one invocation line, or None to skip it."""
+    try:
+        record = json.loads(raw.decode("utf-8"))
+        at = datetime.fromisoformat(str(record["timestamp"]).replace("Z", "+00:00"))
+    except (ValueError, KeyError, TypeError):
+        return None
+    if not isinstance(record, dict) or record.get("record_type") != "invocation":
+        return None
+    at = at if at.tzinfo else at.replace(tzinfo=timezone.utc)
+    where = record.get("execution_location") if record.get("execution_location") in ("local", "remote") else "unknown"
+    tokens = record.get("total_tokens")
+    tokens = tokens if isinstance(tokens, int) and not isinstance(tokens, bool) and tokens >= 0 else None
+    return at, where, tokens, record.get("model")
+
+
 def token_usage(path=None, hours=24, now=None):
-    """Local vs remote model invocations and tokens from the token-telemetry JSONL log, or None without a log."""
+    """Local vs remote model invocations and tokens from the token-telemetry JSONL log, or None without a log.
+
+    The log is read incrementally: each call parses only the bytes appended since the previous call and keeps
+    the records still inside the window, so collection cost does not grow with the log's full history. A
+    replaced or truncated file (log rotation) is read again from the start.
+    """
     path = Path(path or os.getenv("TOKEN_TELEMETRY_PATH", str(Path.home() / ".agents/data/token-telemetry/telemetry.jsonl"))).expanduser()
     since = (now or datetime.now(timezone.utc)) - timedelta(hours=hours)
+    with _TOKEN_LOGS_LOCK:
+        try:
+            with path.open("rb") as log:
+                stat = os.fstat(log.fileno())
+                state = _TOKEN_LOGS.get(str(path))
+                if state is None or state["inode"] != (stat.st_dev, stat.st_ino) or stat.st_size < state["offset"]:
+                    state = {"inode": (stat.st_dev, stat.st_ino), "offset": 0, "records": []}
+                log.seek(state["offset"])
+                for raw in log:
+                    record = _token_record(raw)
+                    if not raw.endswith(b"\n") and record is None:
+                        break  # a line still being written; read it on a later call
+                    state["offset"] += len(raw)
+                    if record and record[0] >= since:
+                        state["records"].append(record)
+        except OSError:
+            _TOKEN_LOGS.pop(str(path), None)
+            return None
+        state["records"] = [record for record in state["records"] if record[0] >= since]
+        _TOKEN_LOGS[str(path)] = state
+        records = list(state["records"])
     totals = {key: {"invocations": 0, "tokens": 0, "unmeasured": 0} for key in ("local", "remote", "unknown")}
     last_at, last_model = None, None
-    try:
-        with path.open(encoding="utf-8") as lines:
-            for line in lines:
-                try:
-                    record = json.loads(line)
-                    at = datetime.fromisoformat(str(record["timestamp"]).replace("Z", "+00:00"))
-                except (ValueError, KeyError, TypeError):
-                    continue
-                if not isinstance(record, dict) or record.get("record_type") != "invocation":
-                    continue
-                at = at if at.tzinfo else at.replace(tzinfo=timezone.utc)
-                if at < since:
-                    continue
-                where = record.get("execution_location") if record.get("execution_location") in ("local", "remote") else "unknown"
-                totals[where]["invocations"] += 1
-                tokens = record.get("total_tokens")
-                if isinstance(tokens, int) and not isinstance(tokens, bool) and tokens >= 0:
-                    totals[where]["tokens"] += tokens
-                else:
-                    totals[where]["unmeasured"] += 1
-                if where == "local" and (last_at is None or at > last_at):
-                    last_at, last_model = at, record.get("model")
-    except (OSError, UnicodeDecodeError):
-        return None
+    for at, where, tokens, model in records:
+        totals[where]["invocations"] += 1
+        if tokens is None:
+            totals[where]["unmeasured"] += 1
+        else:
+            totals[where]["tokens"] += tokens
+        if where == "local" and (last_at is None or at > last_at):
+            last_at, last_model = at, model
     measured = totals["local"]["tokens"] + totals["remote"]["tokens"]
     return {"window_hours": hours, **totals,
             "local_share": round(100 * totals["local"]["tokens"] / measured, 1) if measured else None,
