@@ -97,7 +97,7 @@ def ollama_status(base=None, timeout=1.5):
         size, vram = _int(model.get("size")), _int(model.get("size_vram"))
         models.append({
             "name": str(model.get("name") or "unknown"), "size": size, "size_vram": vram,
-            "gpu_percent": round(min(100, 100 * vram / size), 1) if size else None,
+            "gpu_percent": round(min(100, 100 * vram / size), 1) if size and isinstance(model.get("size_vram"), (int, float)) and not isinstance(model.get("size_vram"), bool) and model["size_vram"] >= 0 else None,
             "expires_at": model.get("expires_at") if isinstance(model.get("expires_at"), str) else None,
             "parameter_size": details.get("parameter_size"), "quantization": details.get("quantization_level"),
         })
