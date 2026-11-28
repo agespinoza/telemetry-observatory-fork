@@ -167,5 +167,31 @@ const delegation = obs.find(o => /not being delegated locally/.test(o[0]));
 assert.ok(delegation && delegation[1]);
 obs = context.aiObservations([{sampled_at: '2026-01-01T00:00:00Z', memory: {}, local_ai: {ollama: {reachable: false, models: []}, processes: [], tokens: null}}]);
 assert.match(obs[0][0], /not answering/);
+assert.doesNotMatch(obs[0][0], /cloud/);
+obs = context.aiObservations([sample(40, [model(60)])], false);
+text = obs.map(o => o[0]).join('\n');
+assert.match(text, /stale/);
+assert.doesNotMatch(text, /CPU memory|working right now|likely local inference/);
+obs = context.aiObservations([sample(40, [model(100)])]);
+assert.match(obs.map(o => o[0]).join('\n'), /likely local inference.*device-wide/);
+const partial = {local: {invocations: 2, tokens: 0, unmeasured: 2}, remote: {invocations: 0, tokens: 0, unmeasured: 0}, local_share: null, last_local_at: null};
+obs = context.aiObservations([sample(0, [], {tokens: partial})]);
+assert.match(obs.map(o => o[0]).join('\n'), /2 model calls .* no token count/);
 """
     subprocess.run(['node', '-e', script, str(dashboard)], check=True)
+
+
+def test_token_usage_counts_unmeasured_calls(tmp_path):
+    log = tmp_path / "telemetry.jsonl"
+    log.write_text(
+        '{"timestamp": "2026-01-01T12:00:00Z", "record_type": "invocation", "execution_location": "local", "total_tokens": null}\n'
+        '{"timestamp": "2026-01-01T12:00:00Z", "record_type": "invocation", "execution_location": "local", "total_tokens": 0}\n'
+    )
+    result = host_sensor.token_usage(log, now=datetime(2026, 1, 1, 13, tzinfo=timezone.utc))
+    assert result["local"] == {"invocations": 2, "tokens": 0, "unmeasured": 1}
+
+
+def test_token_usage_invalid_utf8_is_unavailable(tmp_path):
+    log = tmp_path / "telemetry.jsonl"
+    log.write_bytes(b'{"timestamp": "2026-01-01T12:00:00Z"}\n\xff\xfe broken\n')
+    assert host_sensor.token_usage(log) is None

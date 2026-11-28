@@ -107,9 +107,9 @@ def ollama_status(base=None, timeout=1.5):
 
 def token_usage(path=None, hours=24, now=None):
     """Local vs remote model invocations and tokens from the token-telemetry JSONL log, or None without a log."""
-    path = Path(path or os.getenv("TOKEN_TELEMETRY_PATH", str(Path.home() / ".agents/data/token-telemetry/telemetry.jsonl")))
+    path = Path(path or os.getenv("TOKEN_TELEMETRY_PATH", str(Path.home() / ".agents/data/token-telemetry/telemetry.jsonl"))).expanduser()
     since = (now or datetime.now(timezone.utc)) - timedelta(hours=hours)
-    totals = {key: {"invocations": 0, "tokens": 0} for key in ("local", "remote", "unknown")}
+    totals = {key: {"invocations": 0, "tokens": 0, "unmeasured": 0} for key in ("local", "remote", "unknown")}
     last_at, last_model = None, None
     try:
         with path.open(encoding="utf-8") as lines:
@@ -129,9 +129,11 @@ def token_usage(path=None, hours=24, now=None):
                 tokens = record.get("total_tokens")
                 if isinstance(tokens, int) and not isinstance(tokens, bool) and tokens >= 0:
                     totals[where]["tokens"] += tokens
+                else:
+                    totals[where]["unmeasured"] += 1
                 if where == "local" and (last_at is None or at > last_at):
                     last_at, last_model = at, record.get("model")
-    except OSError:
+    except (OSError, UnicodeDecodeError):
         return None
     measured = totals["local"]["tokens"] + totals["remote"]["tokens"]
     return {"window_hours": hours, **totals,
