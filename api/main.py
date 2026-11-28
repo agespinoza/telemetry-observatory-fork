@@ -80,7 +80,6 @@ class Sample(BaseModel):
     network_io: dict
     applications: list[dict]
     battery: dict | None = None
-    local_ai: dict | None = None
 
 
 @asynccontextmanager
