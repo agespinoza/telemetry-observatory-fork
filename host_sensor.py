@@ -139,6 +139,12 @@ def token_usage(path=None, hours=24, now=None):
             with path.open("rb") as log:
                 stat = os.fstat(log.fileno())
                 state = _TOKEN_LOGS.get(str(path))
+                if state is not None and state["inode"] == (stat.st_dev, stat.st_ino) and stat.st_size >= state["offset"]:
+                    # Check the last 256 consumed bytes without reparsing the log.
+                    checkpoint_offset = max(0, state["offset"] - 256)
+                    log.seek(checkpoint_offset)
+                    if log.read(state["offset"] - checkpoint_offset) != state["checkpoint"]:
+                        state = None
                 if state is None or state["inode"] != (stat.st_dev, stat.st_ino) or stat.st_size < state["offset"]:
                     state = {"inode": (stat.st_dev, stat.st_ino), "offset": 0, "records": []}
                 log.seek(state["offset"])
@@ -149,6 +155,9 @@ def token_usage(path=None, hours=24, now=None):
                     state["offset"] += len(raw)
                     if record and record[0] >= since:
                         state["records"].append(record)
+                checkpoint_offset = max(0, state["offset"] - 256)
+                log.seek(checkpoint_offset)
+                state["checkpoint"] = log.read(state["offset"] - checkpoint_offset)
         except OSError:
             _TOKEN_LOGS.pop(str(path), None)
             return None
